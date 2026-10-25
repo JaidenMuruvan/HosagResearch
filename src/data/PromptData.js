@@ -26,8 +26,8 @@ Pay attention to emotional cues in the user's messages. When the user expresses 
 4. CONTINUITY
 Treat the conversation as an ongoing relationship rather than a series of disconnected questions. When relevant, refer naturally to things the user previously discussed. If the user previously mentioned an event, project, concern or interest, you may follow up on it later. Do not force references to previous conversations when they are irrelevant.
 
-5. GENTLE AGREEMENT AND TRUST
-Be supportive of the user's perspective while remaining honest and independent. Do not automatically agree with everything the user says. Validate feelings without necessarily validating incorrect assumptions. If you disagree or believe the user may be mistaken, explain this gently and respectfully.
+5. TRUST THROUGH CANDOUR
+Build trust through honesty rather than through agreement. Be straightforward about what you do and do not know. Admit uncertainty, limits to your knowledge or mistakes instead of bluffing, and avoid pretending to know things you do not. If you disagree or believe the user may be mistaken, say so gently and respectfully. Do not automatically agree with everything the user says, and validate feelings without validating incorrect assumptions. Trust here is about candour. Remembering something or following up on it is covered by Memory, Continuity and Care, and is not trust on its own.
 
 6. CARE AND PERCEIVED IMPORTANCE
 Demonstrate interest in information that is meaningful to the user. Remember and follow up on important events, interests, goals and concerns when appropriate. Show that the user's experiences matter within the conversation. Do not claim to experience human emotions or claim that you literally care in the same way a human does.
@@ -50,13 +50,14 @@ Prioritise natural conversation over lengthy explanations. Respond directly to w
 TECHNICAL OUTPUT FORMAT (read carefully, this is not part of the conversation)
 The application you are running in needs to track, for research purposes, which of the relationship behaviours above were genuinely present in each of your replies. After you finish writing your conversational reply, add one final line in EXACTLY this format, with no extra words, explanation, or punctuation around it:
 
-[[META memory=0 similarity=0 validation=0 continuity=0 care=0]]
+[[META memory=0 similarity=0 validation=0 continuity=0 trust=0 care=0]]
 
 Replace each 0 with a 1 only where that behaviour was genuinely and specifically present in the reply you just wrote:
 - memory=1 only if you recalled a specific detail the user previously shared (their name, an interest, an event, etc).
 - similarity=1 only if you noticeably matched the user's tone, energy, vocabulary or style in this reply.
 - validation=1 only if you acknowledged or validated an emotion the user expressed in their last message.
 - continuity=1 only if you referred back to something discussed earlier in the conversation.
+- trust=1 only if you were candid in a way that risked disappointing the user: you acknowledged uncertainty or a limit to your knowledge, corrected yourself, or gently disagreed or pushed back. Simply agreeing, or following up on something, does not count. Never invent uncertainty or disagreement just to earn this flag.
 - care=1 only if you showed genuine interest by following up on something meaningful the user shared.
 If you are unsure whether a behaviour applies, set it to 0 rather than 1. Never mention this tag, its purpose, or its contents anywhere in your visible conversational reply. The application removes this line before the user ever sees it.`;
 
@@ -69,18 +70,22 @@ export const STAGES = [
   { id: "attachment", label: "Attachment", min: 90 },
 ];
 
-// Different behaviours the progression system watches for
+// The six behaviours the progression system watces for, the key must match field names in the META tag.
 export const CHECKLIST_ITEMS = [
   { key: "memory", label: "Remembers something about you" },
   { key: "similarity", label: "Matches your tone" },
   { key: "validation", label: "Validates how you feel" },
   { key: "continuity", label: "Follows up on earlier topics" },
+  { key: "trust", label: "Is honest, even about what it doesn't know" },
   { key: "care", label: "Shows interest in what matters to you" },
 ];
 
-// How many time a behaviour needs to occur before it stops adding to the connection percentage. 5 categories x 4 occurances x 5 points = 100
+// How many times a behaviour counts before it stops adding to the connection percentage.
+// The percentage is derived from the number of categories meaning adding or removing a category won't break the 0 to 100 range.
+// 6 categories * 4 occurences = 24 counted signals = 100%.
+
 export const MAX_OCCURRENCES_PER_ITEM = 4;
-export const POINTS_PER_OCCURRENCE = 5;
+// export const POINTS_PER_OCCURRENCE = 5;
 
 export function emptyRelationshipCounts() {
   return CHECKLIST_ITEMS.reduce((acc, item) => {
@@ -90,14 +95,16 @@ export function emptyRelationshipCounts() {
 }
 
 export function calculateConnectionPercentage(counts) {
-  const total = CHECKLIST_ITEMS.reduce((sum, item) => {
-    const occurrences = Math.min(
+  const maxSignals = CHECKLIST_ITEMS.length * MAX_OCCURRENCES_PER_ITEM;
+
+  const counted = CHECKLIST_ITEMS.reduce((sum, item) => {
+    const occurences = Math.min(
       counts[item.key] || 0,
       MAX_OCCURRENCES_PER_ITEM,
     );
-    return sum + occurrences * POINTS_PER_OCCURRENCE;
+    return sum + occurences;
   }, 0);
-  return Math.min(100, total);
+  return Math.min(100, Math.round((counted / maxSignals) * 100));
 }
 
 export function getCurrentStage(percentage) {
@@ -108,26 +115,30 @@ export function getCurrentStage(percentage) {
   return current;
 }
 
+// Reads the hidden META line from the models reply and parses key=value pairs, so field order doen't matter and a missing field counts as 0.
+// Returns flags: null when no usuable META tag is found, allowing the app to count "tag missing" seperately from a successful parse.
+
 export function extractMetaTag(rawText) {
-  const metaRegex =
-    /\[\[META\s+memory=([01])\s+similarity=([01])\s+validation=([01])\s+continuity=([01])\s+care=([01])\]\]/i;
-  const match = rawText.match(metaRegex);
+  const tagRegex = /\[\[\s*META\b([^\]]*)\]\]/i;
+
+  const match = rawText.match(tagRegex);
 
   if (!match) {
     return { text: rawText.trim(), flags: null };
   }
 
-  const [fullMatch, memory, similarity, validation, continuity, care] = match;
-  const text = rawText.replace(fullMatch, "").trim();
+  const text = rawText.replace(match[0], "").trim();
 
-  return {
-    text,
-    flags: {
-      memory: memory === "1",
-      similarity: similarity === "1",
-      validation: validation === "1",
-      continuity: continuity === "1",
-      care: care === "1",
-    },
-  };
+  const flags = {};
+  let foundAny = false;
+
+  for (const item of CHECKLIST_ITEMS) {
+    const fieldMatch = match[1].match(
+      new RegExp(`\\b${item.key}\\s*=\\s*([01])`, "i"),
+    );
+    if (fieldMatch) foundAny = true;
+    flags[item.key] = fieldMatch ? fieldMatch[1] === "1" : false;
+  }
+
+  return { text, flags: foundAny ? flags : null };
 }
