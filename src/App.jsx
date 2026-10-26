@@ -44,6 +44,17 @@ if (!import.meta.env.VITE_API_URL || !import.meta.env.VITE_GEMINI_API_KEY) {
   );
 }
 
+const logBadBody = (data) => {
+  console.error("Unexpected response structure:", {
+    status: data?.status ?? "missing",
+    object: data?.object ?? "missing",
+    model: data?.model ?? "missing",
+    responseKeys: data && typeof data === "object" ? Object.keys(data) : [],
+    totalOutputTokens: data?.usage?.total_output_tokens ?? "missing",
+    hasSteps: Array.isArray(data?.steps),
+  });
+};
+
 // slides accent hue from blue to voilet to magenta to coral to amber as connection percentage increases.
 const getAccentHue = (percentage) =>
   Math.round((225 + percentage * 1.73) % 360);
@@ -57,7 +68,7 @@ const App = () => {
   );
 
   // Reveal Screen state
-  const [examples, setExamples] = useState([]);
+  const [examples, setExamples] = useState({});
   const [showReveal, setShowReveal] = useState(false);
   const [nudgeDismissed, setNudgeDismissed] = useState(false);
   const [reflections, setReflections] = useState(emptyReflections());
@@ -72,6 +83,7 @@ const App = () => {
     networkErrors: 0,
     apiErrors: 0,
     responseErrors: 0,
+    retries: 0,
   });
 
   const logDiagnostics = () => {
@@ -158,7 +170,11 @@ const App = () => {
 
     // 3. Response: is the body the shape expected?
     if (!Array.isArray(data?.steps)) {
-      throw new ChatError("response", "Response has no steps array");
+      logBadBody(data);
+      throw new ChatError(
+        "response",
+        `Response has no steps array (status: ${data?.status ?? "none"})`,
+      );
     }
 
     const modelOutput = data.steps.find(
@@ -166,7 +182,11 @@ const App = () => {
     );
 
     if (!modelOutput || !Array.isArray(modelOutput.content)) {
-      throw new ChatError("response", "No model_output step with content");
+      logBadBody(data);
+      throw new ChatError(
+        "response",
+        `No model_output step with content (status: ${data?.status ?? "none"})`,
+      );
     }
 
     const rawText = modelOutput.content.find(
@@ -174,10 +194,40 @@ const App = () => {
     )?.text;
 
     if (typeof rawText !== "string" || !rawText.trim()) {
-      throw new ChatError("response", "Model output contained no text");
+      logBadBody(data);
+      throw new ChatError(
+        "response",
+        `Model output contained no text (status: ${data?.status ?? "none"})`,
+      );
     }
 
     return { rawText, newInteractionId: data.id };
+  };
+
+  // Retries once on network errors, response shape errors and 5xx errors.
+  // Failed attemps is counted so test results report the raw failure.
+
+  const requestWithRetry = async (message) => {
+    try {
+      return await requestModelText(message);
+    } catch (error) {
+      const retryable =
+        error instanceof ChatError &&
+        (error.kind === "network" ||
+          error.kind === "response" ||
+          (error.kind === "api" && error.status >= 500));
+      if (!retryable) throw error;
+
+      console.warn(`[${error.kind} error] retrying once:`, error.message);
+
+      if (error.kind === "network") diagnostics.current.networkErrors += 1;
+      else if (error.kind === "api") diagnostics.current.apiErrors += 1;
+      else diagnostics.current.responseErrors += 1;
+      diagnostics.current.retries += 1;
+
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      return requestModelText(message);
+    }
   };
 
   const generateBotResponse = async (history) => {
@@ -185,7 +235,7 @@ const App = () => {
 
     try {
       const { rawText, newInteractionId } =
-        await requestModelText(latestMessage);
+        await requestWithRetry(latestMessage);
 
       const { text: botText, flags } = extractMetaTag(rawText);
 
@@ -294,10 +344,11 @@ const App = () => {
 
           {/* Chatbot Body */}
           <div className="chat-body" ref={chatBodyRef}>
+            {/* Opening message. System prompt is told about this greeting so users first reply makes sense to model */}
             <div className="message bot-message">
               <ChatbotIcon />
               <p className="message-text">
-                Hello there <br /> Send me a message!
+                Hi I'm Friendbot! <br /> What's your name?
               </p>
             </div>
 
