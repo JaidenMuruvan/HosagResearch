@@ -44,6 +44,10 @@ if (!import.meta.env.VITE_API_URL || !import.meta.env.VITE_GEMINI_API_KEY) {
   );
 }
 
+// slides accent hue from blue to voilet to magenta to coral to amber as connection percentage increases.
+const getAccentHue = (percentage) =>
+  Math.round((225 + percentage * 1.73) % 360);
+
 const App = () => {
   const [chatHistory, setChatHistory] = useState([]);
   const [interactionId, setInteractionId] = useState(null);
@@ -260,7 +264,11 @@ const App = () => {
   };
 
   return (
-    <div className="app-shell" data-stage={currentStage.id}>
+    <div
+      className="app-shell"
+      data-stage={currentStage.id}
+      style={{ "--hue": getAccentHue(connectionPercentage) }}
+    >
       <div className="container">
         <div className="chatbot-popup">
           {/* Chatbot header */}

@@ -8,8 +8,9 @@
   --surface-soft: #352a54;
   --text-light: #f3eefc;
   --text-muted: #b3a6d6;
-  --accent: #7c8fdb;
-  --accent-soft: #7c8fdb33;
+  --hue: 225;
+  --accent: hsl(var(--hue) 62% 66%);
+  --accent-soft: hsl(var(--hue) 62% 66% / 0.2);
 
   min-height: 100vh;
   width: 100%;
@@ -18,27 +19,6 @@
   justify-content: center;
   background: radial-gradient(circle at 20% 20%, #251c3f 0%, #140f24 70%);
   transition: background 0.6s ease;
-}
-
-.app-shell[data-stage="introduction"] {
-  --accent: #7c8fdb;
-  --accent-soft: #7c8fdb33;
-}
-.app-shell[data-stage="familiarity"] {
-  --accent: #9a7fd9;
-  --accent-soft: #9a7fd933;
-}
-.app-shell[data-stage="affiliation"] {
-  --accent: #c179ad;
-  --accent-soft: #c179ad33;
-}
-.app-shell[data-stage="trust"] {
-  --accent: #e08a6e;
-  --accent-soft: #e08a6e33;
-}
-.app-shell[data-stage="attachment"] {
-  --accent: #e7a94a;
-  --accent-soft: #e7a94a33;
 }
 
 * {
