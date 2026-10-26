@@ -1,8 +1,9 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ChatbotIcon from "./components/ChatbotIcon";
 import ChatForm from "./components/ChatForm";
 import ChatMessage from "./components/ChatMessage";
 import RelationshipTimeline from "./components/RelationshipTimeline.jsx";
+import RevealScreen from "./components/RevealScreen.jsx";
 import {
   SYSTEM_PROMPT,
   emptyRelationshipCounts,
@@ -10,6 +11,11 @@ import {
   getCurrentStage,
   extractMetaTag,
 } from "./data/PromptData";
+
+// Defined point where reveal is offered inside the chat.
+const REVEAL_NUDGE_AFTER = 8;
+
+const emptyReflections = () => ({ personal: "", noticed: "", interface: "" });
 
 // Failures are split into three kinds so they can be told apart
 // network - the request never reached the API or never completed
@@ -46,6 +52,14 @@ const App = () => {
     emptyRelationshipCounts(),
   );
 
+  // Reveal Screen state
+  const [examples, setExamples] = useState([]);
+  const [showReveal, setShowReveal] = useState(false);
+  const [nudgeDismissed, setNudgeDismissed] = useState(false);
+  const [reflections, setReflections] = useState(emptyReflections());
+
+  const chatBodyRef = useRef(null);
+
   // Running tally for testing purposes. After every turn it is printed with console.table.
   const diagnostics = useRef({
     replies: 0,
@@ -63,6 +77,26 @@ const App = () => {
   const connectionPercentage =
     calculateConnectionPercentage(relationshipCounts);
   const currentStage = getCurrentStage(connectionPercentage);
+
+  const userMessageCount = chatHistory.filter(
+    (chat) => chat.role === "user",
+  ).length;
+
+  // At least one real reply, not counting placeholder or errors
+  const hasReplies = chatHistory.some(
+    (chat) => chat.role === "model" && !chat.isTyping && !chat.isError,
+  );
+
+  const showNudge =
+    userMessageCount >= REVEAL_NUDGE_AFTER &&
+    !nudgeDismissed &&
+    !isTyping &&
+    hasReplies;
+
+  useEffect(() => {
+    const el = chatBodyRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  }, [chatHistory, showNudge]);
 
   // Sends the request and returns the validated model text.
   // Throws a ChatError with a kind on any failure.
@@ -168,6 +202,17 @@ const App = () => {
           });
           return next;
         });
+
+        // Remembers the first real example of each behaviour for reveal.
+        setExamples((prevExamples) => {
+          const next = { ...prevExamples };
+          Object.keys(flags).forEach((key) => {
+            if (flags[key] && !next[key]) {
+              next[key] = { userText: latestMessage.text, botText };
+            }
+          });
+          return next;
+        });
       } else {
         // Reply was fine but model left out META tag.
         diagnostics.current.tagMissing += 1;
@@ -203,6 +248,17 @@ const App = () => {
     }
   };
 
+  // Clears the conversation
+  const handleReset = () => {
+    setChatHistory([]);
+    setInteractionId(null);
+    setRelationshipCounts(emptyRelationshipCounts());
+    setExamples({});
+    setReflections(emptyReflections());
+    setNudgeDismissed(false);
+    setShowReveal(false);
+  };
+
   return (
     <div className="app-shell" data-stage={currentStage.id}>
       <div className="container">
@@ -213,13 +269,23 @@ const App = () => {
               <ChatbotIcon />
               <h2 className="logo-text">Friendbot</h2>
             </div>
-            <button className="material-symbols-rounded">
-              keyboard_arrow_down
+            <button
+              type="button"
+              className="reveal-trigger"
+              onClick={() => setShowReveal(true)}
+              disabled={!hasReplies}
+              title={
+                hasReplies
+                  ? "See what was happening behind the scenes"
+                  : "Chat for a bit first"
+              }
+            >
+              End &amp; reflect
             </button>
           </div>
 
           {/* Chatbot Body */}
-          <div className="chat-body">
+          <div className="chat-body" ref={chatBodyRef}>
             <div className="message bot-message">
               <ChatbotIcon />
               <p className="message-text">
@@ -231,6 +297,29 @@ const App = () => {
             {chatHistory.map((chat, index) => (
               <ChatMessage key={index} chat={chat} />
             ))}
+
+            {showNudge && (
+              <div className="reveal-nudge" role="status">
+                We've been chatting for a while. Want to see what was going on
+                behind the scenes?
+                <div className="reveal-nudge-actions">
+                  <button
+                    type="button"
+                    className="reveal-button reveal-button--primary"
+                    onClick={() => setShowReveal(true)}
+                  >
+                    Show me
+                  </button>
+                  <button
+                    type="button"
+                    className="reveal-button reveal-button--ghost"
+                    onClick={() => setNudgeDismissed(true)}
+                  >
+                    Keep chatting
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Chatbot Footer */}
@@ -251,6 +340,20 @@ const App = () => {
           relationshipCounts={relationshipCounts}
         />
       </div>
+
+      {showReveal && (
+        <RevealScreen
+          connectionPercentage={connectionPercentage}
+          currentStage={currentStage}
+          relationshipCounts={relationshipCounts}
+          examples={examples}
+          reflections={reflections}
+          setReflections={setReflections}
+          onBack={() => setShowReveal(false)}
+          onReset={handleReset}
+          canReset={!isTyping}
+        />
+      )}
     </div>
   );
 };
